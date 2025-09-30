@@ -116,7 +116,8 @@ export default {
 				try {
 					const body = await request.json() as JsonRpcRequest;
 
-					if (body.jsonrpc && body.jsonrpc !== "2.0") {
+
+					if (body.jsonrpc !== "2.0") {
 						return new Response(JSON.stringify({
 							jsonrpc: "2.0",
 							id: body.id,
