@@ -92,10 +92,10 @@ export default {
 										type: {
 											type: "string",
 											enum: ["dataset", "organization", "group", "resource"],
-											description: "Type of item to fetch"
+											description: "Type of item to fetch (defaults to 'dataset' if not specified)"
 										}
 									},
-									required: ["id", "type"]
+									required: ["id"]
 								}
 							},
 							{
@@ -285,7 +285,9 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 	let result: any = null;
 	let endpoint = "";
 
-	switch (args.type) {
+	const itemType = args.type || "dataset";
+
+	switch (itemType) {
 		case "dataset":
 			endpoint = `package_show?id=${args.id}`;
 			break;
@@ -303,14 +305,14 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 	result = await portalClient.makeRequest("GET", endpoint);
 
 	let formattedResult: any = {
-		type: args.type,
+		type: itemType,
 		id: result.id,
 		name: result.name,
 		title: result.title || result.display_name,
 		description: result.notes || result.description,
 	};
 
-	if (args.type === "dataset") {
+	if (itemType === "dataset") {
 		formattedResult = {
 			...formattedResult,
 			url: `${portalClient.baseUrl}/dataset/${result.name}`,
@@ -327,7 +329,7 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 				state: result.state,
 			}
 		};
-	} else if (args.type === "organization") {
+	} else if (itemType === "organization") {
 		formattedResult = {
 			...formattedResult,
 			url: `${portalClient.baseUrl}/organization/${result.name}`,
