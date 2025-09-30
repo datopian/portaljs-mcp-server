@@ -346,16 +346,16 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 		formattedResult = {
 			...formattedResult,
 			url: `${portalClient.baseUrl}/dataset/${result.name}`,
-			organization: result.organization,
-			tags: result.tags,
-			resources: result.resources,
-			groups: result.groups,
+			organization: result.organization || null,
+			tags: result.tags || [],
+			resources: result.resources || [],
+			groups: result.groups || [],
 			metadata: {
 				created: result.metadata_created,
 				modified: result.metadata_modified,
-				license: result.license_title,
-				maintainer: result.maintainer,
-				author: result.author,
+				license: result.license_title || '',
+				maintainer: result.maintainer || '',
+				author: result.author || '',
 				state: result.state,
 			}
 		};
@@ -363,13 +363,13 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 		formattedResult = {
 			...formattedResult,
 			url: `${portalClient.baseUrl}/organization/${result.name}`,
-			image_url: result.image_url,
-			package_count: result.package_count,
-			packages: result.packages,
+			image_url: result.image_url || '',
+			package_count: result.package_count || 0,
+			packages: result.packages || [],
 			metadata: {
 				created: result.created,
 				state: result.state,
-				approval_status: result.approval_status,
+				approval_status: result.approval_status || '',
 			}
 		};
 	}
