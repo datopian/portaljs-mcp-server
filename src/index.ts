@@ -397,6 +397,34 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 				approval_status: result.approval_status || null,
 			}
 		};
+	} else if (itemType === "group") {
+		formattedResult = {
+			...formattedResult,
+			url: `${portalClient.baseUrl}/group/${result.name}`,
+			image_url: result.image_url || null,
+			package_count: result.package_count || 0,
+			packages: ensureArray(result.packages),
+			metadata: {
+				created: result.created,
+				state: result.state,
+				approval_status: result.approval_status || null,
+			}
+		};
+	} else if (itemType === "resource") {
+		formattedResult = {
+			...formattedResult,
+			url: result.url || null,
+			format: result.format || null,
+			size: result.size || null,
+			mimetype: result.mimetype || null,
+			hash: result.hash || null,
+			metadata: {
+				created: result.created,
+				last_modified: result.last_modified || null,
+				cache_url: result.cache_url || null,
+				datastore_active: result.datastore_active || false,
+			}
+		};
 	}
 
 	return formattedResult;
