@@ -3,14 +3,16 @@ import { PortalJSAPIClient, createResponse } from "./portaljs-client";
 interface Env {
 	PORTALJS_API_URL?: string;
 	PORTALJS_API_KEY?: string;
+	CORS_ALLOWED_ORIGIN?: string;
 }
 
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 
+		const allowedOrigin = env.CORS_ALLOWED_ORIGIN || '*';
 		const corsHeaders = {
-			'Access-Control-Allow-Origin': '*',
+			'Access-Control-Allow-Origin': allowedOrigin,
 			'Access-Control-Allow-Methods': 'GET, POST, PUT, DELETE, OPTIONS',
 			'Access-Control-Allow-Headers': 'Content-Type, Authorization',
 		};
@@ -226,8 +228,11 @@ async function handleSearch(portalClient: PortalJSAPIClient, args: any) {
 
 	let results: any[] = [];
 
+	const datasetsLimit = searchType === "all" ? Math.ceil(limit / 2) : limit;
+	const orgsLimit = searchType === "all" ? Math.floor(limit / 2) : limit;
+
 	if (searchType === "datasets" || searchType === "all") {
-		const datasets = await portalClient.makeRequest("GET", `package_search?q=${encodeURIComponent(searchQuery)}&rows=${limit}`);
+		const datasets = await portalClient.makeRequest("GET", `package_search?q=${encodeURIComponent(searchQuery)}&rows=${datasetsLimit}`);
 		if (datasets.results) {
 			results = results.concat(
 				datasets.results.map((item: any) => ({
@@ -254,7 +259,7 @@ async function handleSearch(portalClient: PortalJSAPIClient, args: any) {
 			const filteredOrgs = orgs.filter((org: any) =>
 				org.display_name?.toLowerCase().includes(searchQuery.toLowerCase()) ||
 				org.description?.toLowerCase().includes(searchQuery.toLowerCase())
-			).slice(0, limit);
+			).slice(0, orgsLimit);
 
 			results = results.concat(
 				filteredOrgs.map((item: any) => ({
@@ -271,10 +276,6 @@ async function handleSearch(portalClient: PortalJSAPIClient, args: any) {
 				}))
 			);
 		}
-	}
-
-	if (searchType === "all") {
-		results = results.slice(0, limit);
 	}
 
 	return {
