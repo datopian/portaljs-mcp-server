@@ -4,10 +4,11 @@ interface Env {
 	PORTALJS_API_URL?: string;
 	PORTALJS_API_KEY?: string;
 	CORS_ALLOWED_ORIGIN?: string;
+	ENVIRONMENT?: string;
 }
 
 interface JsonRpcRequest {
-	jsonrpc?: string;
+	jsonrpc: string;
 	id?: string | number | null;
 	method: string;
 	params?: any;
@@ -76,6 +77,7 @@ export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
 
+		// Security note: Default '*' allows all origins. Set CORS_ALLOWED_ORIGIN in production.
 		const allowedOrigin = env.CORS_ALLOWED_ORIGIN || '*';
 		const corsHeaders = {
 			'Access-Control-Allow-Origin': allowedOrigin,
@@ -113,6 +115,20 @@ export default {
 			if (request.method === "POST") {
 				try {
 					const body = await request.json() as JsonRpcRequest;
+
+					if (body.jsonrpc && body.jsonrpc !== "2.0") {
+						return new Response(JSON.stringify({
+							jsonrpc: "2.0",
+							id: body.id,
+							error: {
+								code: -32600,
+								message: "Invalid Request: JSON-RPC version must be 2.0"
+							}
+						}), {
+							status: 400,
+							headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+						});
+					}
 
 					if (body.method === "notifications/initialized") {
 						return new Response(null, {
@@ -215,12 +231,16 @@ export default {
 					});
 
 				} catch (error) {
+					const errorMessage = env.ENVIRONMENT === 'production'
+						? 'Internal server error'
+						: `Internal error: ${(error as Error).message}`;
+
 					return new Response(JSON.stringify({
 						jsonrpc: "2.0",
 						id: null,
 						error: {
 							code: -32603,
-							message: `Internal error: ${(error as Error).message}`
+							message: errorMessage
 						}
 					}), {
 						status: 500,
@@ -236,6 +256,10 @@ export default {
 		});
 	},
 };
+
+function ensureArray(value: any): any[] {
+	return Array.isArray(value) ? value : [];
+}
 
 async function handleSearch(portalClient: PortalJSAPIClient, args: any) {
 	const searchQuery = args.query || "";
@@ -338,8 +362,8 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 		type: itemType,
 		id: result.id,
 		name: result.name,
-		title: result.title || result.display_name || '',
-		description: result.notes || result.description || '',
+		title: result.title || result.display_name || null,
+		description: result.notes || result.description || null,
 	};
 
 	if (itemType === "dataset") {
@@ -347,15 +371,15 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 			...formattedResult,
 			url: `${portalClient.baseUrl}/dataset/${result.name}`,
 			organization: result.organization || null,
-			tags: result.tags || [],
-			resources: result.resources || [],
-			groups: result.groups || [],
+			tags: ensureArray(result.tags),
+			resources: ensureArray(result.resources),
+			groups: ensureArray(result.groups),
 			metadata: {
 				created: result.metadata_created,
 				modified: result.metadata_modified,
-				license: result.license_title || '',
-				maintainer: result.maintainer || '',
-				author: result.author || '',
+				license: result.license_title || null,
+				maintainer: result.maintainer || null,
+				author: result.author || null,
 				state: result.state,
 			}
 		};
@@ -363,13 +387,13 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 		formattedResult = {
 			...formattedResult,
 			url: `${portalClient.baseUrl}/organization/${result.name}`,
-			image_url: result.image_url || '',
+			image_url: result.image_url || null,
 			package_count: result.package_count || 0,
-			packages: result.packages || [],
+			packages: ensureArray(result.packages),
 			metadata: {
 				created: result.created,
 				state: result.state,
-				approval_status: result.approval_status || '',
+				approval_status: result.approval_status || null,
 			}
 		};
 	}
