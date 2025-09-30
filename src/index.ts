@@ -6,6 +6,72 @@ interface Env {
 	CORS_ALLOWED_ORIGIN?: string;
 }
 
+interface JsonRpcRequest {
+	jsonrpc?: string;
+	id?: string | number | null;
+	method: string;
+	params?: any;
+}
+
+const MCP_TOOLS = [
+	{
+		name: "search",
+		description: "Search for datasets, organizations, and resources in PortalJS",
+		inputSchema: {
+			type: "object",
+			properties: {
+				query: {
+					type: "string",
+					description: "Search query to find datasets, organizations, or resources"
+				},
+				type: {
+					type: "string",
+					enum: ["datasets", "organizations", "groups", "resources", "all"],
+					description: "Type of content to search for"
+				},
+				limit: {
+					type: "number",
+					description: "Maximum number of results to return"
+				}
+			},
+			required: ["query"]
+		}
+	},
+	{
+		name: "fetch",
+		description: "Fetch detailed information about a specific dataset, organization, or resource",
+		inputSchema: {
+			type: "object",
+			properties: {
+				id: {
+					type: "string",
+					description: "ID or name of the item to fetch"
+				},
+				type: {
+					type: "string",
+					enum: ["dataset", "organization", "group", "resource"],
+					description: "Type of item to fetch (defaults to 'dataset' if not specified)"
+				}
+			},
+			required: ["id"]
+		}
+	},
+	{
+		name: "portaljs_package_search",
+		description: "Search for packages using PortalJS queries",
+		inputSchema: {
+			type: "object",
+			properties: {
+				q: { type: "string", description: "Search query" },
+				fq: { type: "string", description: "Filter query" },
+				sort: { type: "string", description: "Sort order" },
+				rows: { type: "number", description: "Number of results" },
+				start: { type: "number", description: "Offset for pagination" }
+			}
+		}
+	}
+];
+
 export default {
 	async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
 		const url = new URL(request.url);
@@ -46,9 +112,8 @@ export default {
 
 			if (request.method === "POST") {
 				try {
-					const body = await request.json() as any;
+					const body = await request.json() as JsonRpcRequest;
 
-					// Handle notifications/initialized first
 					if (body.method === "notifications/initialized") {
 						return new Response(null, {
 							status: 200,
@@ -57,69 +122,10 @@ export default {
 					}
 
 					if (body.method === "tools/list") {
-						const tools = [
-							{
-								name: "search",
-								description: "Search for datasets, organizations, and resources in PortalJS",
-								inputSchema: {
-									type: "object",
-									properties: {
-										query: {
-											type: "string",
-											description: "Search query to find datasets, organizations, or resources"
-										},
-										type: {
-											type: "string",
-											enum: ["datasets", "organizations", "groups", "resources", "all"],
-											description: "Type of content to search for"
-										},
-										limit: {
-											type: "number",
-											description: "Maximum number of results to return"
-										}
-									},
-									required: ["query"]
-								}
-							},
-							{
-								name: "fetch",
-								description: "Fetch detailed information about a specific dataset, organization, or resource",
-								inputSchema: {
-									type: "object",
-									properties: {
-										id: {
-											type: "string",
-											description: "ID or name of the item to fetch"
-										},
-										type: {
-											type: "string",
-											enum: ["dataset", "organization", "group", "resource"],
-											description: "Type of item to fetch (defaults to 'dataset' if not specified)"
-										}
-									},
-									required: ["id"]
-								}
-							},
-							{
-								name: "portaljs_package_search",
-								description: "Search for packages using PortalJS queries",
-								inputSchema: {
-									type: "object",
-									properties: {
-										q: { type: "string", description: "Search query" },
-										fq: { type: "string", description: "Filter query" },
-										sort: { type: "string", description: "Sort order" },
-										rows: { type: "number", description: "Number of results" },
-										start: { type: "number", description: "Offset for pagination" }
-									}
-								}
-							}
-						];
-
 						return new Response(JSON.stringify({
 							jsonrpc: "2.0",
 							id: body.id,
-							result: { tools }
+							result: { tools: MCP_TOOLS }
 						}), {
 							headers: { ...corsHeaders, 'Content-Type': 'application/json' }
 						});
@@ -142,7 +148,17 @@ export default {
 								result = await handlePackageSearch(portalClient, args);
 								break;
 							default:
-								throw new Error(`Unknown tool: ${name}`);
+								return new Response(JSON.stringify({
+									jsonrpc: "2.0",
+									id: body.id,
+									error: {
+										code: -32601,
+										message: `Unknown tool: ${name}`
+									}
+								}), {
+									status: 404,
+									headers: { ...corsHeaders, 'Content-Type': 'application/json' }
+								});
 						}
 
 						const response = createResponse(true, result);
@@ -232,7 +248,8 @@ async function handleSearch(portalClient: PortalJSAPIClient, args: any) {
 	const orgsLimit = searchType === "all" ? Math.floor(limit / 2) : limit;
 
 	if (searchType === "datasets" || searchType === "all") {
-		const datasets = await portalClient.makeRequest("GET", `package_search?q=${encodeURIComponent(searchQuery)}&rows=${datasetsLimit}`);
+		const queryParams = [`q=${encodeURIComponent(searchQuery)}`, `rows=${datasetsLimit}`];
+		const datasets = await portalClient.makeRequest("GET", `package_search?${queryParams.join("&")}`);
 		if (datasets.results) {
 			results = results.concat(
 				datasets.results.map((item: any) => ({
@@ -313,12 +330,16 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 		throw new Error(`Item not found: ${args.id}`);
 	}
 
+	if (!result.name) {
+		throw new Error(`Invalid item data: missing name field for ${args.id}`);
+	}
+
 	let formattedResult: any = {
 		type: itemType,
 		id: result.id,
 		name: result.name,
-		title: result.title || result.display_name,
-		description: result.notes || result.description,
+		title: result.title || result.display_name || '',
+		description: result.notes || result.description || '',
 	};
 
 	if (itemType === "dataset") {
