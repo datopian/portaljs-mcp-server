@@ -105,6 +105,8 @@ export default {
 									type: "object",
 									properties: {
 										q: { type: "string", description: "Search query" },
+										fq: { type: "string", description: "Filter query" },
+										sort: { type: "string", description: "Sort order" },
 										rows: { type: "number", description: "Number of results" },
 										start: { type: "number", description: "Offset for pagination" }
 									}
@@ -271,7 +273,9 @@ async function handleSearch(portalClient: PortalJSAPIClient, args: any) {
 		}
 	}
 
-	results = results.slice(0, limit);
+	if (searchType === "all") {
+		results = results.slice(0, limit);
+	}
 
 	return {
 		query: searchQuery,
@@ -303,6 +307,10 @@ async function handleFetch(portalClient: PortalJSAPIClient, args: any) {
 	}
 
 	result = await portalClient.makeRequest("GET", endpoint);
+
+	if (!result || !result.id) {
+		throw new Error(`Item not found: ${args.id}`);
+	}
 
 	let formattedResult: any = {
 		type: itemType,

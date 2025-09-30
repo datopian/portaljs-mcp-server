@@ -2,7 +2,8 @@ const cache = new Map<string, { data: any; timestamp: number }>();
 const CACHE_TTL = 300000;
 
 function getCacheKey(endpoint: string, params?: any): string {
-	return `${endpoint}:${JSON.stringify(params || {})}`;
+	const sortedParams = params ? JSON.stringify(params, Object.keys(params).sort()) : '{}';
+	return `${endpoint}:${sortedParams}`;
 }
 
 function isCacheValid(timestamp: number): boolean {
@@ -85,6 +86,11 @@ export class PortalJSAPIClient {
 		}
 
 		const response = await fetch(url);
+
+		if (!response.ok) {
+			throw new Error(`PortalJS API HTTP Error: ${response.status} ${response.statusText}`);
+		}
+
 		const result = await response.json() as PortalJSResponse;
 
 		if (!result.success) {
