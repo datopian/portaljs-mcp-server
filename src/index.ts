@@ -1,7 +1,7 @@
 import { PortalJSAPIClient, createResponse } from "./portaljs-client";
 
 interface Env {
-	PORTALJS_API_URL?: string;
+	API_URL?: string;
 }
 
 interface JsonRpcRequest {
@@ -60,7 +60,7 @@ export default {
 			return new Response(null, { headers: corsHeaders });
 		}
 
-		const portalUrl = env.PORTALJS_API_URL || "https://api.cloud.portaljs.com";
+		const portalUrl = env.API_URL || "https://api.cloud.portaljs.com";
 		const portalClient = new PortalJSAPIClient(portalUrl);
 		if (url.pathname === "/") {
 			return new Response("PortalJS MCP Server - Use /sse for MCP connections", {
