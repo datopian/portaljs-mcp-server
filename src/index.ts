@@ -55,7 +55,7 @@ export class MyMCP extends McpAgent<Env> {
 					};
 				}
 
-				const results = data.result.results ? data.result.results.map((item: any) => ({
+				const results = data.result && data.result.results ? data.result.results.map((item: any) => ({
 					id: item.id,
 					name: item.name,
 					title: item.title,
@@ -118,9 +118,18 @@ export class MyMCP extends McpAgent<Env> {
 					};
 				}
 
+				if (!data.result) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: Missing result for request: ${id}`
+						}]
+					};
+				}
+
 				const result = data.result;
 
-				if (!result || !result.id) {
+				if (!result.id) {
 					return {
 						content: [{
 							type: "text",
