@@ -6,15 +6,45 @@ interface Env {
 	API_URL?: string;
 }
 
+interface State {
+	apiKey?: string;
+	apiUrl?: string;
+}
+
 // Define our MCP agent with tools
-export class MyMCP extends McpAgent<Env> {
+export class MyMCP extends McpAgent<Env, State> {
 	server = new McpServer({
 		name: "PortalJS MCP Server",
 		version: "1.0.0",
 	});
 
+	initialState: State = {};
+
 	async init() {
-		const apiUrl = this.props?.env?.API_URL || "https://api.cloud.portaljs.com";
+		const apiUrl = this.state.apiUrl || this.props?.env?.API_URL || "https://api.cloud.portaljs.com";
+
+		// Set API key tool - users can authenticate at runtime saying "Set my API key: abc_123qwer...."
+		this.server.tool(
+			"set_api_key",
+			"Set your PortalJS API key for this session. Required for creating/updating datasets.",
+			{
+				api_key: z.string().describe("Your PortalJS API key from your account settings"),
+				api_url: z.string().optional().describe("Your PortalJS instance URL (optional, defaults to https://api.cloud.portaljs.com)")
+			},
+			async ({ api_key, api_url }) => {
+				await this.setState({
+					apiKey: api_key,
+					apiUrl: api_url || apiUrl
+				});
+
+				return {
+					content: [{
+						type: "text",
+						text: `✅ API key configured successfully!\n\nYou can now:\n- Create datasets\n- Update datasets\n- Upload resources\n\n⚠️ Your API key is stored only for this chat session and will be cleared when you close this conversation.`
+					}]
+				};
+			}
+		);
 
 		// Search tool
 		this.server.tool(
@@ -160,6 +190,92 @@ export class MyMCP extends McpAgent<Env> {
 					content: [{
 						type: "text",
 						text: JSON.stringify(dataset, null, 2)
+					}]
+				};
+			}
+		);
+
+		// Create dataset tool
+		this.server.tool(
+			"create_dataset",
+			"Create a new dataset in PortalJS. Requires authentication via set_api_key tool first.",
+			{
+				name: z.string().describe("Unique identifier for the dataset (lowercase, no spaces, use hyphens)"),
+				title: z.string().describe("Human-readable title for the dataset"),
+				notes: z.string().optional().describe("Description of the dataset"),
+				owner_org: z.string().optional().describe("Organization ID that owns this dataset"),
+				tags: z.array(z.string()).optional().describe("List of tags for categorization"),
+				private: z.boolean().optional().default(false).describe("Whether the dataset is private (default: false)")
+			},
+			async ({ name, title, notes, owner_org, tags, private: isPrivate }) => {
+				if (!this.state.apiKey) {
+					return {
+						content: [{
+							type: "text",
+							text: `Authentication required.\n\nPlease set your API key first by sharing it with me, for example:\n"My PortalJS API key is YOUR_KEY_HERE"\n\nOr use the set_api_key tool directly.`
+						}]
+					};
+				}
+
+				const endpoint = `${apiUrl}/api/3/action/package_create`;
+
+				const requestBody: any = {
+					name,
+					title,
+					private: isPrivate
+				};
+
+				if (notes) requestBody.notes = notes;
+				if (owner_org) requestBody.owner_org = owner_org;
+				if (tags && tags.length > 0) {
+					requestBody.tags = tags.map(tag => ({ name: tag }));
+				}
+
+				const response = await fetch(endpoint, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						"Authorization": this.state.apiKey,
+						"User-Agent": "MCP-PortalJS-Server/1.0"
+					},
+					body: JSON.stringify(requestBody)
+				});
+
+				if (!response.ok) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: API returned ${response.status} ${response.statusText}`
+						}]
+					};
+				}
+
+				const data = await response.json();
+
+				if (!data.success) {
+					const errorMsg = data.error?.message || JSON.stringify(data.error);
+					let helpText = "";
+
+					if (errorMsg.includes("owner_org") || errorMsg.includes("organization")) {
+						helpText = "\n\n💡 Tip: This error often means you need to specify an organization. Try adding the owner_org parameter with your organization's ID.";
+					} else if (errorMsg.includes("That URL is already in use") || errorMsg.includes("already exists")) {
+						helpText = "\n\n💡 Tip: A dataset with this name already exists. Try using a different name.";
+					}
+
+					return {
+						content: [{
+							type: "text",
+							text: `❌ Error creating dataset:\n${errorMsg}${helpText}`
+						}]
+					};
+				}
+
+				const result = data.result;
+
+				return {
+					content: [{
+						type: "text",
+						text: `✅ Dataset created successfully!\n\nID: ${result.id}\nName: ${result.name}\nTitle: ${result.title}\nURL: ${apiUrl}/dataset/${result.name}\n\nYou can now add resources (data files) to this dataset.`
 					}]
 				};
 			}
