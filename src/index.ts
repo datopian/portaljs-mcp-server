@@ -280,6 +280,473 @@ export class MyMCP extends McpAgent<Env, State> {
 				};
 			}
 		);
+
+		// List organizations tool
+		this.server.tool(
+			"list_organizations",
+			"List organizations that you belong to. Use this to find organization IDs for creating datasets.",
+			{},
+			async () => {
+				if (!this.state.apiKey) {
+					return {
+						content: [{
+							type: "text",
+							text: `Authentication required.\n\nPlease set your API key first.`
+						}]
+					};
+				}
+
+				const endpoint = `${apiUrl}/api/3/action/organization_list_for_user`;
+
+				const response = await fetch(endpoint, {
+					method: "GET",
+					headers: {
+						"Content-Type": "application/json",
+						"Authorization": this.state.apiKey,
+						"User-Agent": "MCP-PortalJS-Server/1.0"
+					}
+				});
+
+				if (!response.ok) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: API returned ${response.status} ${response.statusText}`
+						}]
+					};
+				}
+
+				const data = await response.json();
+
+				if (!data.success || !data.result) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: ${JSON.stringify(data.error)}`
+						}]
+					};
+				}
+
+				const orgs = data.result.map((org: any) => ({
+					id: org.id,
+					name: org.name,
+					title: org.title || org.display_name,
+					description: org.description
+				}));
+
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify({ organizations: orgs }, null, 2)
+					}]
+				};
+			}
+		);
+
+		// Create resource tool
+		this.server.tool(
+			"create_resource",
+			"Add a resource (file or URL) to an existing dataset. Resources can be CSV, JSON, Excel files, or external URLs.",
+			{
+				package_id: z.string().describe("ID or name of the dataset to add the resource to"),
+				name: z.string().describe("Name of the resource (e.g., 'data.csv', 'API endpoint')"),
+				url: z.string().describe("URL to the resource (can be external URL or data URL)"),
+				description: z.string().optional().describe("Description of the resource"),
+				format: z.string().optional().describe("Format of the resource (e.g., CSV, JSON, XLSX)")
+			},
+			async ({ package_id, name, url, description, format }) => {
+				if (!this.state.apiKey) {
+					return {
+						content: [{
+							type: "text",
+							text: `Authentication required.\n\nPlease set your API key first.`
+						}]
+					};
+				}
+
+				const endpoint = `${apiUrl}/api/3/action/resource_create`;
+
+				const requestBody: any = {
+					package_id,
+					name,
+					url
+				};
+
+				if (description) requestBody.description = description;
+				if (format) requestBody.format = format;
+
+				const response = await fetch(endpoint, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						"Authorization": this.state.apiKey,
+						"User-Agent": "MCP-PortalJS-Server/1.0"
+					},
+					body: JSON.stringify(requestBody)
+				});
+
+				if (!response.ok) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: API returned ${response.status} ${response.statusText}`
+						}]
+					};
+				}
+
+				const data = await response.json();
+
+				if (!data.success) {
+					return {
+						content: [{
+							type: "text",
+							text: `❌ Error creating resource:\n${JSON.stringify(data.error)}`
+						}]
+					};
+				}
+
+				const result = data.result;
+
+				return {
+					content: [{
+						type: "text",
+						text: `✅ Resource added successfully!\n\nID: ${result.id}\nName: ${result.name}\nFormat: ${result.format || 'N/A'}\nURL: ${result.url}`
+					}]
+				};
+			}
+		);
+
+		// Update dataset tool
+		this.server.tool(
+			"update_dataset",
+			"Update an existing dataset's metadata (title, description, tags, etc.)",
+			{
+				id: z.string().describe("ID or name of the dataset to update"),
+				title: z.string().optional().describe("New title for the dataset"),
+				notes: z.string().optional().describe("New description for the dataset"),
+				tags: z.array(z.string()).optional().describe("New list of tags (replaces existing tags)"),
+				private: z.boolean().optional().describe("Change visibility (true = private, false = public)")
+			},
+			async ({ id, title, notes, tags, private: isPrivate }) => {
+				if (!this.state.apiKey) {
+					return {
+						content: [{
+							type: "text",
+							text: `Authentication required.\n\nPlease set your API key first.`
+						}]
+					};
+				}
+
+				const endpoint = `${apiUrl}/api/3/action/package_patch`;
+
+				const requestBody: any = { id };
+
+				if (title) requestBody.title = title;
+				if (notes) requestBody.notes = notes;
+				if (tags) requestBody.tags = tags.map(tag => ({ name: tag }));
+				if (isPrivate !== undefined) requestBody.private = isPrivate;
+
+				const response = await fetch(endpoint, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						"Authorization": this.state.apiKey,
+						"User-Agent": "MCP-PortalJS-Server/1.0"
+					},
+					body: JSON.stringify(requestBody)
+				});
+
+				if (!response.ok) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: API returned ${response.status} ${response.statusText}`
+						}]
+					};
+				}
+
+				const data = await response.json();
+
+				if (!data.success) {
+					return {
+						content: [{
+							type: "text",
+							text: `❌ Error updating dataset:\n${JSON.stringify(data.error)}`
+						}]
+					};
+				}
+
+				const result = data.result;
+
+				return {
+					content: [{
+						type: "text",
+						text: `✅ Dataset updated successfully!\n\nName: ${result.name}\nTitle: ${result.title}\nURL: ${apiUrl}/dataset/${result.name}`
+					}]
+				};
+			}
+		);
+
+		// Create organization tool
+		this.server.tool(
+			"create_organization",
+			"Create a new organization in PortalJS",
+			{
+				name: z.string().describe("Unique identifier for the organization (lowercase, no spaces, use hyphens)"),
+				title: z.string().describe("Display name for the organization"),
+				description: z.string().optional().describe("Description of the organization")
+			},
+			async ({ name, title, description }) => {
+				if (!this.state.apiKey) {
+					return {
+						content: [{
+							type: "text",
+							text: `Authentication required.\n\nPlease set your API key first.`
+						}]
+					};
+				}
+
+				const endpoint = `${apiUrl}/api/3/action/organization_create`;
+
+				const requestBody: any = { name, title };
+				if (description) requestBody.description = description;
+
+				const response = await fetch(endpoint, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						"Authorization": this.state.apiKey,
+						"User-Agent": "MCP-PortalJS-Server/1.0"
+					},
+					body: JSON.stringify(requestBody)
+				});
+
+				if (!response.ok) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: API returned ${response.status} ${response.statusText}`
+						}]
+					};
+				}
+
+				const data = await response.json();
+
+				if (!data.success) {
+					return {
+						content: [{
+							type: "text",
+							text: `❌ Error creating organization:\n${JSON.stringify(data.error)}`
+						}]
+					};
+				}
+
+				const result = data.result;
+
+				return {
+					content: [{
+						type: "text",
+						text: `✅ Organization created successfully!\n\nID: ${result.id}\nName: ${result.name}\nTitle: ${result.title}`
+					}]
+				};
+			}
+		);
+
+		// Update organization tool
+		this.server.tool(
+			"update_organization",
+			"Update an existing organization's details",
+			{
+				id: z.string().describe("ID or name of the organization to update"),
+				title: z.string().optional().describe("New display name for the organization"),
+				description: z.string().optional().describe("New description for the organization")
+			},
+			async ({ id, title, description }) => {
+				if (!this.state.apiKey) {
+					return {
+						content: [{
+							type: "text",
+							text: `Authentication required.\n\nPlease set your API key first.`
+						}]
+					};
+				}
+
+				const endpoint = `${apiUrl}/api/3/action/organization_patch`;
+
+				const requestBody: any = { id };
+				if (title) requestBody.title = title;
+				if (description) requestBody.description = description;
+
+				const response = await fetch(endpoint, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						"Authorization": this.state.apiKey,
+						"User-Agent": "MCP-PortalJS-Server/1.0"
+					},
+					body: JSON.stringify(requestBody)
+				});
+
+				if (!response.ok) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: API returned ${response.status} ${response.statusText}`
+						}]
+					};
+				}
+
+				const data = await response.json();
+
+				if (!data.success) {
+					return {
+						content: [{
+							type: "text",
+							text: `❌ Error updating organization:\n${JSON.stringify(data.error)}`
+						}]
+					};
+				}
+
+				const result = data.result;
+
+				return {
+					content: [{
+						type: "text",
+						text: `✅ Organization updated successfully!\n\nName: ${result.name}\nTitle: ${result.title}`
+					}]
+				};
+			}
+		);
+
+		// Add user to organization tool
+		this.server.tool(
+			"add_user_to_organization",
+			"Add a user to an organization with a specific role",
+			{
+				organization_id: z.string().describe("ID or name of the organization"),
+				username: z.string().describe("Username of the user to add"),
+				role: z.enum(["member", "editor", "admin"]).describe("Role for the user in the organization")
+			},
+			async ({ organization_id, username, role }) => {
+				if (!this.state.apiKey) {
+					return {
+						content: [{
+							type: "text",
+							text: `Authentication required.\n\nPlease set your API key first.`
+						}]
+					};
+				}
+
+				const endpoint = `${apiUrl}/api/3/action/organization_member_create`;
+
+				const requestBody = {
+					id: organization_id,
+					username,
+					role
+				};
+
+				const response = await fetch(endpoint, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						"Authorization": this.state.apiKey,
+						"User-Agent": "MCP-PortalJS-Server/1.0"
+					},
+					body: JSON.stringify(requestBody)
+				});
+
+				if (!response.ok) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: API returned ${response.status} ${response.statusText}`
+						}]
+					};
+				}
+
+				const data = await response.json();
+
+				if (!data.success) {
+					return {
+						content: [{
+							type: "text",
+							text: `❌ Error adding user to organization:\n${JSON.stringify(data.error)}`
+						}]
+					};
+				}
+
+				return {
+					content: [{
+						type: "text",
+						text: `✅ User added to organization successfully!\n\nUsername: ${username}\nRole: ${role}`
+					}]
+				};
+			}
+		);
+
+		// Remove user from organization tool
+		this.server.tool(
+			"remove_user_from_organization",
+			"Remove a user from an organization",
+			{
+				organization_id: z.string().describe("ID or name of the organization"),
+				username: z.string().describe("Username of the user to remove")
+			},
+			async ({ organization_id, username }) => {
+				if (!this.state.apiKey) {
+					return {
+						content: [{
+							type: "text",
+							text: `Authentication required.\n\nPlease set your API key first.`
+						}]
+					};
+				}
+
+				const endpoint = `${apiUrl}/api/3/action/organization_member_delete`;
+
+				const requestBody = {
+					id: organization_id,
+					username
+				};
+
+				const response = await fetch(endpoint, {
+					method: "POST",
+					headers: {
+						"Content-Type": "application/json",
+						"Authorization": this.state.apiKey,
+						"User-Agent": "MCP-PortalJS-Server/1.0"
+					},
+					body: JSON.stringify(requestBody)
+				});
+
+				if (!response.ok) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: API returned ${response.status} ${response.statusText}`
+						}]
+					};
+				}
+
+				const data = await response.json();
+
+				if (!data.success) {
+					return {
+						content: [{
+							type: "text",
+							text: `❌ Error removing user from organization:\n${JSON.stringify(data.error)}`
+						}]
+					};
+				}
+
+				return {
+					content: [{
+						type: "text",
+						text: `✅ User removed from organization successfully!\n\nUsername: ${username}`
+					}]
+				};
+			}
+		);
 	}
 }
 
