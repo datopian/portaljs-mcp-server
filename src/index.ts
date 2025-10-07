@@ -20,8 +20,11 @@ export class MyMCP extends McpAgent<Env, State> {
 
 	initialState: State = {};
 
+	getApiUrl(): string {
+		return this.state.apiUrl || this.props?.env?.API_URL || "https://api.cloud.portaljs.com";
+	}
+
 	async init() {
-		const apiUrl = this.state.apiUrl || this.props?.env?.API_URL || "https://api.cloud.portaljs.com";
 
 		// Set API key tool - users can authenticate at runtime saying "Set my API key: abc_123qwer...."
 		this.server.tool(
@@ -34,7 +37,7 @@ export class MyMCP extends McpAgent<Env, State> {
 			async ({ api_key, api_url }) => {
 				await this.setState({
 					apiKey: api_key,
-					apiUrl: api_url || apiUrl
+					apiUrl: api_url || this.getApiUrl()
 				});
 
 				return {
@@ -55,6 +58,7 @@ export class MyMCP extends McpAgent<Env, State> {
 				limit: z.number().optional().default(10).describe("Maximum number of results to return (default: 10)")
 			},
 			async ({ query, limit }) => {
+				const apiUrl = this.getApiUrl();
 				const endpoint = `${apiUrl}/api/3/action/package_search?q=${encodeURIComponent(query)}&rows=${limit}`;
 
 				const response = await fetch(endpoint, {
@@ -118,6 +122,7 @@ export class MyMCP extends McpAgent<Env, State> {
 				id: z.string().describe("ID or name of the dataset to fetch")
 			},
 			async ({ id }) => {
+				const apiUrl = this.getApiUrl();
 				const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
 
 				const response = await fetch(endpoint, {
@@ -208,6 +213,8 @@ export class MyMCP extends McpAgent<Env, State> {
 				private: z.boolean().optional().default(false).describe("Whether the dataset is private (default: false)")
 			},
 			async ({ name, title, notes, owner_org, tags, private: isPrivate }) => {
+				const apiUrl = this.getApiUrl();
+
 				if (!this.state.apiKey) {
 					return {
 						content: [{
@@ -287,6 +294,8 @@ export class MyMCP extends McpAgent<Env, State> {
 			"List organizations that you belong to. Use this to find organization IDs for creating datasets.",
 			{},
 			async () => {
+				const apiUrl = this.getApiUrl();
+
 				if (!this.state.apiKey) {
 					return {
 						content: [{
@@ -355,6 +364,8 @@ export class MyMCP extends McpAgent<Env, State> {
 				format: z.string().optional().describe("Format of the resource (e.g., CSV, JSON, XLSX)")
 			},
 			async ({ package_id, name, url, description, format }) => {
+				const apiUrl = this.getApiUrl();
+
 				if (!this.state.apiKey) {
 					return {
 						content: [{
@@ -428,6 +439,8 @@ export class MyMCP extends McpAgent<Env, State> {
 				private: z.boolean().optional().describe("Change visibility (true = private, false = public)")
 			},
 			async ({ id, title, notes, tags, private: isPrivate }) => {
+				const apiUrl = this.getApiUrl();
+
 				if (!this.state.apiKey) {
 					return {
 						content: [{
@@ -497,6 +510,8 @@ export class MyMCP extends McpAgent<Env, State> {
 				description: z.string().optional().describe("Description of the organization")
 			},
 			async ({ name, title, description }) => {
+				const apiUrl = this.getApiUrl();
+
 				if (!this.state.apiKey) {
 					return {
 						content: [{
@@ -562,6 +577,8 @@ export class MyMCP extends McpAgent<Env, State> {
 				description: z.string().optional().describe("New description for the organization")
 			},
 			async ({ id, title, description }) => {
+				const apiUrl = this.getApiUrl();
+
 				if (!this.state.apiKey) {
 					return {
 						content: [{
@@ -628,6 +645,8 @@ export class MyMCP extends McpAgent<Env, State> {
 				role: z.enum(["member", "editor", "admin"]).describe("Role for the user in the organization")
 			},
 			async ({ organization_id, username, role }) => {
+				const apiUrl = this.getApiUrl();
+
 				if (!this.state.apiKey) {
 					return {
 						content: [{
@@ -693,6 +712,8 @@ export class MyMCP extends McpAgent<Env, State> {
 				username: z.string().describe("Username of the user to remove")
 			},
 			async ({ organization_id, username }) => {
+				const apiUrl = this.getApiUrl();
+
 				if (!this.state.apiKey) {
 					return {
 						content: [{
