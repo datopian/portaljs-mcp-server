@@ -13,8 +13,16 @@ export class MyMCP extends McpAgent<Env> {
 		version: "1.0.0",
 	});
 
+	private apiKey?: string;
+
 	async init() {
 		const apiUrl = this.props?.env?.API_URL || "https://api.cloud.portaljs.com";
+
+		// Extract API key from custom header (example: http://mcp.portaljs.com/sse?apiKey=1234...)
+		const apiKeyHeader = this.props?.request?.headers?.get?.("X-PortalJS-API-Key");
+		if (apiKeyHeader) {
+			this.apiKey = apiKeyHeader;
+		}
 
 		// Search tool
 		this.server.tool(
@@ -27,12 +35,18 @@ export class MyMCP extends McpAgent<Env> {
 			async ({ query, limit }) => {
 				const endpoint = `${apiUrl}/api/3/action/package_search?q=${encodeURIComponent(query)}&rows=${limit}`;
 
+				const headers: Record<string, string> = {
+					"Content-Type": "application/json",
+					"User-Agent": "MCP-PortalJS-Server/1.0"
+				};
+
+				if (this.apiKey) {
+					headers["Authorization"] = this.apiKey;
+				}
+
 				const response = await fetch(endpoint, {
 					method: "GET",
-					headers: {
-						"Content-Type": "application/json",
-						"User-Agent": "MCP-PortalJS-Server/1.0"
-					}
+					headers
 				});
 
 				if (!response.ok) {
@@ -90,12 +104,18 @@ export class MyMCP extends McpAgent<Env> {
 			async ({ id }) => {
 				const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
 
+				const headers: Record<string, string> = {
+					"Content-Type": "application/json",
+					"User-Agent": "MCP-PortalJS-Server/1.0"
+				};
+
+				if (this.apiKey) {
+					headers["Authorization"] = this.apiKey;
+				}
+
 				const response = await fetch(endpoint, {
 					method: "GET",
-					headers: {
-						"Content-Type": "application/json",
-						"User-Agent": "MCP-PortalJS-Server/1.0"
-					}
+					headers
 				});
 
 				if (!response.ok) {
@@ -171,12 +191,23 @@ export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
 
+		// Inject API key from URL parameter as custom header if present
+		const apiKey = url.searchParams.get("apiKey");
+		const requestWithAuth = apiKey
+			? new Request(request, {
+					headers: new Headers({
+						...Object.fromEntries(request.headers),
+						"X-PortalJS-API-Key": apiKey,
+					}),
+			  })
+			: request;
+
 		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
-			return MyMCP.serveSSE("/sse").fetch(request, env, ctx);
+			return MyMCP.serveSSE("/sse").fetch(requestWithAuth, env, ctx);
 		}
 
 		if (url.pathname === "/mcp") {
-			return MyMCP.serve("/mcp").fetch(request, env, ctx);
+			return MyMCP.serve("/mcp").fetch(requestWithAuth, env, ctx);
 		}
 
 		return new Response("Not found", { status: 404 });
