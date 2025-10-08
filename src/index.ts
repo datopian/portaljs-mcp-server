@@ -21,7 +21,31 @@ export class MyMCP extends McpAgent<Env, State> {
 	initialState: State = {};
 
 	getApiUrl(): string {
-		return this.state.apiUrl || this.props?.env?.API_URL || "https://api.cloud.portaljs.com";
+		const DEFAULT_URL = "https://api.cloud.portaljs.com";
+		const candidate = this.state.apiUrl || this.props?.env?.API_URL || DEFAULT_URL;
+
+		try {
+			const url = new URL(candidate);
+
+			if (url.protocol === "http:") {
+				url.protocol = "https:";
+			}
+
+			if (url.protocol !== "https:") {
+				return DEFAULT_URL;
+			}
+
+			let pathname = url.pathname;
+			if (pathname.endsWith("/")) {
+				pathname = pathname.slice(0, -1);
+			}
+
+			pathname = pathname.replace(/\/+/g, "/");
+
+			return url.origin + pathname;
+		} catch {
+			return DEFAULT_URL;
+		}
 	}
 
 	async init() {
@@ -35,9 +59,31 @@ export class MyMCP extends McpAgent<Env, State> {
 				api_url: z.string().optional().describe("Your PortalJS instance URL (optional, defaults to https://api.cloud.portaljs.com)")
 			},
 			async ({ api_key, api_url }) => {
+				let normalizedUrl: string;
+
+				if (!api_url) {
+					normalizedUrl = this.getApiUrl();
+				} else {
+					try {
+						const url = new URL(api_url);
+
+						if (url.protocol === "http:") {
+							url.protocol = "https:";
+						}
+
+						if (url.protocol !== "https:") {
+							normalizedUrl = this.getApiUrl();
+						} else {
+							normalizedUrl = url.origin;
+						}
+					} catch {
+						normalizedUrl = this.getApiUrl();
+					}
+				}
+
 				await this.setState({
 					apiKey: api_key,
-					apiUrl: api_url || this.getApiUrl()
+					apiUrl: normalizedUrl
 				});
 
 				return {
