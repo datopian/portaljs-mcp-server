@@ -567,6 +567,270 @@ export class MyMCP extends McpAgent<Env, State> {
 				};
 			}
 		);
+
+		// Get dataset statistics tool
+		this.server.tool(
+			"get_dataset_stats",
+			"Get quick statistics about a dataset including number of resources, total size, last update time, and format types",
+			{
+				id: z.string().describe("ID or name of the dataset")
+			},
+			async ({ id }) => {
+				const apiUrl = this.getApiUrl();
+				const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
+
+				const response = await fetch(endpoint);
+				const data = await response.json();
+
+				if (!data.success || !data.result) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: Dataset not found or invalid ID`
+						}]
+					};
+				}
+
+				const pkg = data.result;
+				const resources = pkg.resources || [];
+				const formats = [...new Set(resources.map((r: any) => r.format).filter(Boolean))];
+				const totalSize = resources.reduce((sum: number, r: any) => sum + (r.size || 0), 0);
+
+				const stats = {
+					name: pkg.name,
+					title: pkg.title,
+					organization: pkg.organization?.title || "None",
+					resource_count: resources.length,
+					formats: formats,
+					total_size_bytes: totalSize,
+					total_size_human: totalSize > 0 ? `${(totalSize / 1024 / 1024).toFixed(2)} MB` : "Unknown",
+					last_modified: pkg.metadata_modified,
+					created: pkg.metadata_created,
+					views: pkg.tracking_summary?.total || 0,
+					tags: pkg.tags?.map((t: any) => t.name) || []
+				};
+
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify(stats, null, 2)
+					}]
+				};
+			}
+		);
+
+		// Preview resource data
+		this.server.tool(
+			"preview_resource",
+			"Preview the first few rows of a CSV or JSON resource to understand its structure and sample data",
+			{
+				resource_id: z.string().describe("ID of the resource to preview"),
+				limit: z.number().optional().default(5).describe("Number of rows to preview (default: 5, max: 100)")
+			},
+			async ({ resource_id, limit }) => {
+				const apiUrl = this.getApiUrl();
+				const maxLimit = Math.min(limit, 100);
+				const endpoint = `${apiUrl}/api/3/action/datastore_search?resource_id=${encodeURIComponent(resource_id)}&limit=${maxLimit}`;
+
+				const response = await fetch(endpoint);
+				const data = await response.json();
+
+				if (!data.success) {
+					return {
+						content: [{
+							type: "text",
+							text: `❌ Cannot preview this resource. It may not be in the DataStore or may not support previews.\n\nTry using 'fetch' tool to see the resource URL and download it manually.`
+						}]
+					};
+				}
+
+				const records = data.result.records;
+				const fields = data.result.fields?.map((f: any) => ({ name: f.id, type: f.type })) || [];
+
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify({
+							schema: fields,
+							total_records: data.result.total,
+							preview_rows: records.length,
+							sample_data: records
+						}, null, 2)
+					}]
+				};
+			}
+		);
+
+		// Get related datasets
+		this.server.tool(
+			"get_related_datasets",
+			"Discover datasets related to a given dataset - either from the same organization or with similar tags",
+			{
+				id: z.string().describe("ID or name of the reference dataset"),
+				relation_type: z.enum(["organization", "tags", "both"]).optional().default("both").describe("How to find related datasets")
+			},
+			async ({ id, relation_type }) => {
+				const apiUrl = this.getApiUrl();
+
+				const sourceEndpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
+				const sourceResponse = await fetch(sourceEndpoint);
+				const sourceData = await sourceResponse.json();
+
+				if (!sourceData.success || !sourceData.result) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: Source dataset not found`
+						}]
+					};
+				}
+
+				const source = sourceData.result;
+				const relatedDatasets: any[] = [];
+
+				if (relation_type === "organization" || relation_type === "both") {
+					if (source.organization) {
+						const orgEndpoint = `${apiUrl}/api/3/action/package_search?fq=organization:${encodeURIComponent(source.organization.name)}&rows=10`;
+						const orgResponse = await fetch(orgEndpoint);
+						const orgData = await orgResponse.json();
+
+						if (orgData.success) {
+							relatedDatasets.push(...orgData.result.results.filter((d: any) => d.id !== source.id));
+						}
+					}
+				}
+
+				if (relation_type === "tags" || relation_type === "both") {
+					if (source.tags && source.tags.length > 0) {
+						const tagNames = source.tags.map((t: any) => t.name).slice(0, 3);
+						const tagQuery = tagNames.join(" OR ");
+						const tagEndpoint = `${apiUrl}/api/3/action/package_search?q=${encodeURIComponent(tagQuery)}&rows=10`;
+						const tagResponse = await fetch(tagEndpoint);
+						const tagData = await tagResponse.json();
+
+						if (tagData.success) {
+							const tagResults = tagData.result.results.filter((d: any) => d.id !== source.id);
+							relatedDatasets.push(...tagResults);
+						}
+					}
+				}
+
+				const uniqueDatasets = Array.from(new Map(relatedDatasets.map(d => [d.id, d])).values());
+
+				const results = uniqueDatasets.slice(0, 10).map((d: any) => ({
+					name: d.name,
+					title: d.title,
+					organization: d.organization?.title,
+					tags: d.tags?.map((t: any) => t.name).slice(0, 5),
+					url: `${apiUrl}/dataset/${d.name}`
+				}));
+
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify({
+							source_dataset: source.title,
+							relation_type,
+							found: results.length,
+							related_datasets: results
+						}, null, 2)
+					}]
+				};
+			}
+		);
+
+		// Get organization details
+		this.server.tool(
+			"get_organization_details",
+			"Get detailed information about an organization including description, dataset count, and creation date for verifying data reliability",
+			{
+				id: z.string().describe("ID or name of the organization")
+			},
+			async ({ id }) => {
+				const apiUrl = this.getApiUrl();
+				const endpoint = `${apiUrl}/api/3/action/organization_show?id=${encodeURIComponent(id)}&include_datasets=false`;
+
+				const response = await fetch(endpoint);
+				const data = await response.json();
+
+				if (!data.success || !data.result) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: Organization not found`
+						}]
+					};
+				}
+
+				const org = data.result;
+
+				const details = {
+					name: org.name,
+					title: org.title || org.display_name,
+					description: org.description,
+					created: org.created,
+					dataset_count: org.package_count,
+					image_url: org.image_url,
+					url: `${apiUrl}/organization/${org.name}`,
+					type: org.type,
+					state: org.state
+				};
+
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify(details, null, 2)
+					}]
+				};
+			}
+		);
+
+		// Compare datasets
+		this.server.tool(
+			"compare_datasets",
+			"Compare metadata of multiple datasets side-by-side to help choose the best option for your needs",
+			{
+				dataset_ids: z.array(z.string()).describe("Array of dataset IDs or names to compare (max 5)")
+			},
+			async ({ dataset_ids }) => {
+				const apiUrl = this.getApiUrl();
+				const idsToCompare = dataset_ids.slice(0, 5);
+
+				const comparisons = await Promise.all(
+					idsToCompare.map(async (id) => {
+						const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
+						const response = await fetch(endpoint);
+						const data = await response.json();
+
+						if (!data.success || !data.result) {
+							return { id, error: "Not found" };
+						}
+
+						const pkg = data.result;
+						return {
+							name: pkg.name,
+							title: pkg.title,
+							organization: pkg.organization?.title || "None",
+							created: pkg.metadata_created,
+							last_modified: pkg.metadata_modified,
+							resource_count: pkg.resources?.length || 0,
+							formats: [...new Set(pkg.resources?.map((r: any) => r.format).filter(Boolean))],
+							tags: pkg.tags?.map((t: any) => t.name) || [],
+							license: pkg.license_title,
+							private: pkg.private,
+							url: `${apiUrl}/dataset/${pkg.name}`
+						};
+					})
+				);
+
+				return {
+					content: [{
+						type: "text",
+						text: JSON.stringify({ comparison: comparisons }, null, 2)
+					}]
+				};
+			}
+		);
 	}
 }
 
