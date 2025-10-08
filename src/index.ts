@@ -48,6 +48,18 @@ export class MyMCP extends McpAgent<Env, State> {
 		}
 	}
 
+	private requireAuth(): { content: Array<{ type: "text"; text: string }> } | null {
+		if (!this.state.apiKey) {
+			return {
+				content: [{
+					type: "text",
+					text: `Authentication required.\n\nPlease set your API key first.`
+				}]
+			};
+		}
+		return null;
+	}
+
 	async init() {
 
 		// Set API key tool - users can authenticate at runtime saying "Set my API key: abc_123qwer...."
@@ -259,17 +271,10 @@ export class MyMCP extends McpAgent<Env, State> {
 				private: z.boolean().optional().default(false).describe("Whether the dataset is private (default: false)")
 			},
 			async ({ name, title, notes, owner_org, tags, private: isPrivate }) => {
+				const authError = this.requireAuth();
+				if (authError) return authError;
+
 				const apiUrl = this.getApiUrl();
-
-				if (!this.state.apiKey) {
-					return {
-						content: [{
-							type: "text",
-							text: `Authentication required.\n\nPlease set your API key first by sharing it with me, for example:\n"My PortalJS API key is YOUR_KEY_HERE"\n\nOr use the set_api_key tool directly.`
-						}]
-					};
-				}
-
 				const endpoint = `${apiUrl}/api/3/action/package_create`;
 
 				const requestBody: any = {
@@ -340,17 +345,10 @@ export class MyMCP extends McpAgent<Env, State> {
 			"List organizations that you belong to. Use this to find organization IDs for creating datasets.",
 			{},
 			async () => {
+				const authError = this.requireAuth();
+				if (authError) return authError;
+
 				const apiUrl = this.getApiUrl();
-
-				if (!this.state.apiKey) {
-					return {
-						content: [{
-							type: "text",
-							text: `Authentication required.\n\nPlease set your API key first.`
-						}]
-					};
-				}
-
 				const endpoint = `${apiUrl}/api/3/action/organization_list_for_user`;
 
 				const response = await fetch(endpoint, {
@@ -410,17 +408,10 @@ export class MyMCP extends McpAgent<Env, State> {
 				format: z.string().optional().describe("Format of the resource (e.g., CSV, JSON, XLSX)")
 			},
 			async ({ package_id, name, url, description, format }) => {
+				const authError = this.requireAuth();
+				if (authError) return authError;
+
 				const apiUrl = this.getApiUrl();
-
-				if (!this.state.apiKey) {
-					return {
-						content: [{
-							type: "text",
-							text: `Authentication required.\n\nPlease set your API key first.`
-						}]
-					};
-				}
-
 				const endpoint = `${apiUrl}/api/3/action/resource_create`;
 
 				const requestBody: any = {
@@ -485,17 +476,10 @@ export class MyMCP extends McpAgent<Env, State> {
 				private: z.boolean().optional().describe("Change visibility (true = private, false = public)")
 			},
 			async ({ id, title, notes, tags, private: isPrivate }) => {
+				const authError = this.requireAuth();
+				if (authError) return authError;
+
 				const apiUrl = this.getApiUrl();
-
-				if (!this.state.apiKey) {
-					return {
-						content: [{
-							type: "text",
-							text: `Authentication required.\n\nPlease set your API key first.`
-						}]
-					};
-				}
-
 				const endpoint = `${apiUrl}/api/3/action/package_patch`;
 
 				const requestBody: any = { id };
@@ -556,17 +540,10 @@ export class MyMCP extends McpAgent<Env, State> {
 				description: z.string().optional().describe("New description for the organization")
 			},
 			async ({ id, title, description }) => {
+				const authError = this.requireAuth();
+				if (authError) return authError;
+
 				const apiUrl = this.getApiUrl();
-
-				if (!this.state.apiKey) {
-					return {
-						content: [{
-							type: "text",
-							text: `Authentication required.\n\nPlease set your API key first.`
-						}]
-					};
-				}
-
 				const endpoint = `${apiUrl}/api/3/action/organization_patch`;
 
 				const requestBody: any = { id };
@@ -622,46 +599,55 @@ export class MyMCP extends McpAgent<Env, State> {
 				id: z.string().describe("ID or name of the dataset")
 			},
 			async ({ id }) => {
-				const apiUrl = this.getApiUrl();
-				const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
+				try {
+					const apiUrl = this.getApiUrl();
+					const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
 
-				const response = await fetch(endpoint);
-				const data = await response.json();
+					const response = await fetch(endpoint);
+					const data = await response.json();
 
-				if (!data.success || !data.result) {
+					if (!data.success || !data.result) {
+						return {
+							content: [{
+								type: "text",
+								text: `Error: Dataset not found or invalid ID`
+							}]
+						};
+					}
+
+					const pkg = data.result;
+					const resources = pkg.resources || [];
+					const formats = [...new Set(resources.map((r: any) => r.format).filter(Boolean))];
+					const totalSize = resources.reduce((sum: number, r: any) => sum + (r.size || 0), 0);
+
+					const stats = {
+						name: pkg.name,
+						title: pkg.title,
+						organization: pkg.organization?.title || "None",
+						resource_count: resources.length,
+						formats: formats,
+						total_size_bytes: totalSize,
+						total_size_human: totalSize > 0 ? `${(totalSize / 1024 / 1024).toFixed(2)} MB` : "Unknown",
+						last_modified: pkg.metadata_modified,
+						created: pkg.metadata_created,
+						views: pkg.tracking_summary?.total || 0,
+						tags: pkg.tags?.map((t: any) => t.name) || []
+					};
+
 					return {
 						content: [{
 							type: "text",
-							text: `Error: Dataset not found or invalid ID`
+							text: JSON.stringify(stats, null, 2)
+						}]
+					};
+				} catch (error) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: Failed to fetch dataset statistics. ${error instanceof Error ? error.message : 'Unknown error'}`
 						}]
 					};
 				}
-
-				const pkg = data.result;
-				const resources = pkg.resources || [];
-				const formats = [...new Set(resources.map((r: any) => r.format).filter(Boolean))];
-				const totalSize = resources.reduce((sum: number, r: any) => sum + (r.size || 0), 0);
-
-				const stats = {
-					name: pkg.name,
-					title: pkg.title,
-					organization: pkg.organization?.title || "None",
-					resource_count: resources.length,
-					formats: formats,
-					total_size_bytes: totalSize,
-					total_size_human: totalSize > 0 ? `${(totalSize / 1024 / 1024).toFixed(2)} MB` : "Unknown",
-					last_modified: pkg.metadata_modified,
-					created: pkg.metadata_created,
-					views: pkg.tracking_summary?.total || 0,
-					tags: pkg.tags?.map((t: any) => t.name) || []
-				};
-
-				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify(stats, null, 2)
-					}]
-				};
 			}
 		);
 
@@ -674,36 +660,45 @@ export class MyMCP extends McpAgent<Env, State> {
 				limit: z.number().optional().default(5).describe("Number of rows to preview (default: 5, max: 100)")
 			},
 			async ({ resource_id, limit }) => {
-				const apiUrl = this.getApiUrl();
-				const maxLimit = Math.min(limit, 100);
-				const endpoint = `${apiUrl}/api/3/action/datastore_search?resource_id=${encodeURIComponent(resource_id)}&limit=${maxLimit}`;
+				try {
+					const apiUrl = this.getApiUrl();
+					const maxLimit = Math.min(limit, 100);
+					const endpoint = `${apiUrl}/api/3/action/datastore_search?resource_id=${encodeURIComponent(resource_id)}&limit=${maxLimit}`;
 
-				const response = await fetch(endpoint);
-				const data = await response.json();
+					const response = await fetch(endpoint);
+					const data = await response.json();
 
-				if (!data.success) {
+					if (!data.success) {
+						return {
+							content: [{
+								type: "text",
+								text: `❌ Cannot preview this resource. It may not be in the DataStore or may not support previews.\n\nTry using 'fetch' tool to see the resource URL and download it manually.`
+							}]
+						};
+					}
+
+					const records = data.result.records;
+					const fields = data.result.fields?.map((f: any) => ({ name: f.id, type: f.type })) || [];
+
 					return {
 						content: [{
 							type: "text",
-							text: `❌ Cannot preview this resource. It may not be in the DataStore or may not support previews.\n\nTry using 'fetch' tool to see the resource URL and download it manually.`
+							text: JSON.stringify({
+								schema: fields,
+								total_records: data.result.total,
+								preview_rows: records.length,
+								sample_data: records
+							}, null, 2)
+						}]
+					};
+				} catch (error) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: Failed to preview resource. ${error instanceof Error ? error.message : 'Unknown error'}`
 						}]
 					};
 				}
-
-				const records = data.result.records;
-				const fields = data.result.fields?.map((f: any) => ({ name: f.id, type: f.type })) || [];
-
-				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({
-							schema: fields,
-							total_records: data.result.total,
-							preview_rows: records.length,
-							sample_data: records
-						}, null, 2)
-					}]
-				};
 			}
 		);
 
@@ -716,72 +711,81 @@ export class MyMCP extends McpAgent<Env, State> {
 				relation_type: z.enum(["organization", "tags", "both"]).optional().default("both").describe("How to find related datasets")
 			},
 			async ({ id, relation_type }) => {
-				const apiUrl = this.getApiUrl();
+				try {
+					const apiUrl = this.getApiUrl();
 
-				const sourceEndpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
-				const sourceResponse = await fetch(sourceEndpoint);
-				const sourceData = await sourceResponse.json();
+					const sourceEndpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
+					const sourceResponse = await fetch(sourceEndpoint);
+					const sourceData = await sourceResponse.json();
 
-				if (!sourceData.success || !sourceData.result) {
+					if (!sourceData.success || !sourceData.result) {
+						return {
+							content: [{
+								type: "text",
+								text: `Error: Source dataset not found`
+							}]
+						};
+					}
+
+					const source = sourceData.result;
+					const relatedDatasets: any[] = [];
+
+					if (relation_type === "organization" || relation_type === "both") {
+						if (source.organization) {
+							const orgEndpoint = `${apiUrl}/api/3/action/package_search?fq=organization:${encodeURIComponent(source.organization.name)}&rows=10`;
+							const orgResponse = await fetch(orgEndpoint);
+							const orgData = await orgResponse.json();
+
+							if (orgData.success) {
+								relatedDatasets.push(...orgData.result.results.filter((d: any) => d.id !== source.id));
+							}
+						}
+					}
+
+					if (relation_type === "tags" || relation_type === "both") {
+						if (source.tags && source.tags.length > 0) {
+							const tagNames = source.tags.map((t: any) => t.name).slice(0, 3);
+							const tagQuery = tagNames.join(" OR ");
+							const tagEndpoint = `${apiUrl}/api/3/action/package_search?q=${encodeURIComponent(tagQuery)}&rows=10`;
+							const tagResponse = await fetch(tagEndpoint);
+							const tagData = await tagResponse.json();
+
+							if (tagData.success) {
+								const tagResults = tagData.result.results.filter((d: any) => d.id !== source.id);
+								relatedDatasets.push(...tagResults);
+							}
+						}
+					}
+
+					const uniqueDatasets = Array.from(new Map(relatedDatasets.map(d => [d.id, d])).values());
+
+					const results = uniqueDatasets.slice(0, 10).map((d: any) => ({
+						name: d.name,
+						title: d.title,
+						organization: d.organization?.title,
+						tags: d.tags?.map((t: any) => t.name).slice(0, 5),
+						url: `${apiUrl}/dataset/${d.name}`
+					}));
+
 					return {
 						content: [{
 							type: "text",
-							text: `Error: Source dataset not found`
+							text: JSON.stringify({
+								source_dataset: source.title,
+								relation_type,
+								found: results.length,
+								related_datasets: results
+							}, null, 2)
+						}]
+					};
+				} catch (error) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: Failed to fetch related datasets. ${error instanceof Error ? error.message : 'Unknown error'}`
 						}]
 					};
 				}
-
-				const source = sourceData.result;
-				const relatedDatasets: any[] = [];
-
-				if (relation_type === "organization" || relation_type === "both") {
-					if (source.organization) {
-						const orgEndpoint = `${apiUrl}/api/3/action/package_search?fq=organization:${encodeURIComponent(source.organization.name)}&rows=10`;
-						const orgResponse = await fetch(orgEndpoint);
-						const orgData = await orgResponse.json();
-
-						if (orgData.success) {
-							relatedDatasets.push(...orgData.result.results.filter((d: any) => d.id !== source.id));
-						}
-					}
-				}
-
-				if (relation_type === "tags" || relation_type === "both") {
-					if (source.tags && source.tags.length > 0) {
-						const tagNames = source.tags.map((t: any) => t.name).slice(0, 3);
-						const tagQuery = tagNames.join(" OR ");
-						const tagEndpoint = `${apiUrl}/api/3/action/package_search?q=${encodeURIComponent(tagQuery)}&rows=10`;
-						const tagResponse = await fetch(tagEndpoint);
-						const tagData = await tagResponse.json();
-
-						if (tagData.success) {
-							const tagResults = tagData.result.results.filter((d: any) => d.id !== source.id);
-							relatedDatasets.push(...tagResults);
-						}
-					}
-				}
-
-				const uniqueDatasets = Array.from(new Map(relatedDatasets.map(d => [d.id, d])).values());
-
-				const results = uniqueDatasets.slice(0, 10).map((d: any) => ({
-					name: d.name,
-					title: d.title,
-					organization: d.organization?.title,
-					tags: d.tags?.map((t: any) => t.name).slice(0, 5),
-					url: `${apiUrl}/dataset/${d.name}`
-				}));
-
-				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({
-							source_dataset: source.title,
-							relation_type,
-							found: results.length,
-							related_datasets: results
-						}, null, 2)
-					}]
-				};
 			}
 		);
 
@@ -793,41 +797,50 @@ export class MyMCP extends McpAgent<Env, State> {
 				id: z.string().describe("ID or name of the organization")
 			},
 			async ({ id }) => {
-				const apiUrl = this.getApiUrl();
-				const endpoint = `${apiUrl}/api/3/action/organization_show?id=${encodeURIComponent(id)}&include_datasets=false`;
+				try {
+					const apiUrl = this.getApiUrl();
+					const endpoint = `${apiUrl}/api/3/action/organization_show?id=${encodeURIComponent(id)}&include_datasets=false`;
 
-				const response = await fetch(endpoint);
-				const data = await response.json();
+					const response = await fetch(endpoint);
+					const data = await response.json();
 
-				if (!data.success || !data.result) {
+					if (!data.success || !data.result) {
+						return {
+							content: [{
+								type: "text",
+								text: `Error: Organization not found`
+							}]
+						};
+					}
+
+					const org = data.result;
+
+					const details = {
+						name: org.name,
+						title: org.title || org.display_name,
+						description: org.description,
+						created: org.created,
+						dataset_count: org.package_count,
+						image_url: org.image_url,
+						url: `${apiUrl}/organization/${org.name}`,
+						type: org.type,
+						state: org.state
+					};
+
 					return {
 						content: [{
 							type: "text",
-							text: `Error: Organization not found`
+							text: JSON.stringify(details, null, 2)
+						}]
+					};
+				} catch (error) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: Failed to fetch organization details. ${error instanceof Error ? error.message : 'Unknown error'}`
 						}]
 					};
 				}
-
-				const org = data.result;
-
-				const details = {
-					name: org.name,
-					title: org.title || org.display_name,
-					description: org.description,
-					created: org.created,
-					dataset_count: org.package_count,
-					image_url: org.image_url,
-					url: `${apiUrl}/organization/${org.name}`,
-					type: org.type,
-					state: org.state
-				};
-
-				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify(details, null, 2)
-					}]
-				};
 			}
 		);
 
@@ -839,42 +852,51 @@ export class MyMCP extends McpAgent<Env, State> {
 				dataset_ids: z.array(z.string()).describe("Array of dataset IDs or names to compare (max 5)")
 			},
 			async ({ dataset_ids }) => {
-				const apiUrl = this.getApiUrl();
-				const idsToCompare = dataset_ids.slice(0, 5);
+				try {
+					const apiUrl = this.getApiUrl();
+					const idsToCompare = dataset_ids.slice(0, 5);
 
-				const comparisons = await Promise.all(
-					idsToCompare.map(async (id) => {
-						const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
-						const response = await fetch(endpoint);
-						const data = await response.json();
+					const comparisons = await Promise.all(
+						idsToCompare.map(async (id) => {
+							const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
+							const response = await fetch(endpoint);
+							const data = await response.json();
 
-						if (!data.success || !data.result) {
-							return { id, error: "Not found" };
-						}
+							if (!data.success || !data.result) {
+								return { id, error: "Not found" };
+							}
 
-						const pkg = data.result;
-						return {
-							name: pkg.name,
-							title: pkg.title,
-							organization: pkg.organization?.title || "None",
-							created: pkg.metadata_created,
-							last_modified: pkg.metadata_modified,
-							resource_count: pkg.resources?.length || 0,
-							formats: [...new Set(pkg.resources?.map((r: any) => r.format).filter(Boolean))],
-							tags: pkg.tags?.map((t: any) => t.name) || [],
-							license: pkg.license_title,
-							private: pkg.private,
-							url: `${apiUrl}/dataset/${pkg.name}`
-						};
-					})
-				);
+							const pkg = data.result;
+							return {
+								name: pkg.name,
+								title: pkg.title,
+								organization: pkg.organization?.title || "None",
+								created: pkg.metadata_created,
+								last_modified: pkg.metadata_modified,
+								resource_count: pkg.resources?.length || 0,
+								formats: [...new Set(pkg.resources?.map((r: any) => r.format).filter(Boolean))],
+								tags: pkg.tags?.map((t: any) => t.name) || [],
+								license: pkg.license_title,
+								private: pkg.private,
+								url: `${apiUrl}/dataset/${pkg.name}`
+							};
+						})
+					);
 
-				return {
-					content: [{
-						type: "text",
-						text: JSON.stringify({ comparison: comparisons }, null, 2)
-					}]
-				};
+					return {
+						content: [{
+							type: "text",
+							text: JSON.stringify({ comparison: comparisons }, null, 2)
+						}]
+					};
+				} catch (error) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: Failed to compare datasets. ${error instanceof Error ? error.message : 'Unknown error'}`
+						}]
+					};
+				}
 			}
 		);
 	}
