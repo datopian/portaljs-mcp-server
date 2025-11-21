@@ -95,8 +95,6 @@ export class MyMCP extends McpAgent {
 				const apiUrl = CURRENT_API_URL;
 				const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
 
-				console.error('[FETCH] API URL:', apiUrl);
-
 				const response = await fetch(endpoint, {
 					method: "GET",
 					headers: {
@@ -181,8 +179,7 @@ export class MyMCP extends McpAgent {
 				limit: z.number().optional().default(10).describe("Number of rows to preview (default: 10, max: 100)")
 			},
 			async ({ resource_id, limit }) => {
-				console.error('[PREVIEW] API URL:', apiUrl);
-
+				const apiUrl = CURRENT_API_URL;
 				const maxLimit = Math.min(limit, 100);
 
 				const parseCSV = (text: string, rowLimit: number): { fields: string[], records: any[] } => {
@@ -361,7 +358,6 @@ export default {
 			const [, hasAt, orgName, endpoint] = orgMatch;
 
 			CURRENT_API_URL = `https://api.cloud.portaljs.com/@${orgName}`;
-			console.error('[ROUTER] Org:', orgName, 'Set CURRENT_API_URL to:', CURRENT_API_URL);
 
 			if (endpoint === "sse") {
 				return MyMCP.serveSSE(`/${orgName}/sse`).fetch(request, env, ctx);
