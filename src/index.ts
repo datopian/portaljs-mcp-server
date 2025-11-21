@@ -4,6 +4,7 @@ import { z } from "zod";
 
 interface Env {
 	API_URL?: string;
+	ORGANIZATION?: string;
 }
 
 // Define our MCP agent with tools
@@ -15,6 +16,7 @@ export class MyMCP extends McpAgent<Env> {
 
 	async init() {
 		const apiUrl = this.props?.env?.API_URL || "https://api.cloud.portaljs.com";
+		const organization = this.props?.env?.ORGANIZATION;
 
 		// Search tool
 		this.server.tool(
@@ -25,7 +27,11 @@ export class MyMCP extends McpAgent<Env> {
 				limit: z.number().optional().default(10).describe("Maximum number of results to return (default: 10)")
 			},
 			async ({ query, limit }) => {
-				const endpoint = `${apiUrl}/api/3/action/package_search?q=${encodeURIComponent(query)}&rows=${limit}`;
+				let endpoint = `${apiUrl}/api/3/action/package_search?q=${encodeURIComponent(query)}&rows=${limit}`;
+
+				if (organization) {
+					endpoint += `&fq=organization:${encodeURIComponent(organization)}`;
+				}
 
 				const response = await fetch(endpoint, {
 					method: "GET",
@@ -72,6 +78,7 @@ export class MyMCP extends McpAgent<Env> {
 						type: "text",
 						text: JSON.stringify({
 							query,
+							organization: organization || "all",
 							total_results: results.length,
 							results
 						}, null, 2)
@@ -134,6 +141,15 @@ export class MyMCP extends McpAgent<Env> {
 						content: [{
 							type: "text",
 							text: `Error: Dataset not found: ${id}`
+						}]
+					};
+				}
+
+				if (organization && result.organization?.name !== organization) {
+					return {
+						content: [{
+							type: "text",
+							text: `Error: Dataset '${id}' not found in organization '${organization}'`
 						}]
 					};
 				}
@@ -256,6 +272,21 @@ export class MyMCP extends McpAgent<Env> {
 						};
 					}
 
+					if (organization) {
+						const packageEndpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(resourceData.result.package_id)}`;
+						const packageResponse = await fetch(packageEndpoint);
+						const packageData = await packageResponse.json();
+
+						if (packageData.success && packageData.result?.organization?.name !== organization) {
+							return {
+								content: [{
+									type: "text",
+									text: `Error: Resource not found in organization '${organization}'`
+								}]
+							};
+						}
+					}
+
 					const resourceUrl = resourceData.result.url;
 					const format = (resourceData.result.format || '').toLowerCase();
 
@@ -345,12 +376,44 @@ export default {
 	fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
 
-		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
-			return MyMCP.serveSSE("/sse").fetch(request, env, ctx);
+		const pathParts = url.pathname.split('/').filter(p => p);
+		let organization: string | undefined;
+		let matchedPath: string | undefined;
+
+		if (pathParts.length >= 2 && pathParts[0].startsWith('@') && pathParts[1] === 'sse') {
+			organization = pathParts[0].substring(1); // Remove @ prefix
+			matchedPath = '/sse';
+		}
+		else if (pathParts.length >= 3 && pathParts[0].startsWith('@') && pathParts[1] === 'sse' && pathParts[2] === 'message') {
+			organization = pathParts[0].substring(1); // Remove @ prefix
+			matchedPath = '/sse/message';
+		}
+		else if (pathParts.length >= 2 && pathParts[0].startsWith('@') && pathParts[1] === 'mcp') {
+			organization = pathParts[0].substring(1); // Remove @ prefix
+			matchedPath = '/mcp';
+		}
+		else if (url.pathname === "/sse" || url.pathname === "/sse/message") {
+			matchedPath = url.pathname;
+		}
+		else if (url.pathname === "/mcp") {
+			matchedPath = "/mcp";
 		}
 
-		if (url.pathname === "/mcp") {
-			return MyMCP.serve("/mcp").fetch(request, env, ctx);
+		if (!matchedPath) {
+			return new Response("Not found", { status: 404 });
+		}
+
+		const envWithOrg: Env = {
+			...env,
+			ORGANIZATION: organization
+		};
+
+		if (matchedPath === "/sse" || matchedPath === "/sse/message") {
+			return MyMCP.serveSSE("/sse").fetch(request, envWithOrg, ctx);
+		}
+
+		if (matchedPath === "/mcp") {
+			return MyMCP.serve("/mcp").fetch(request, envWithOrg, ctx);
 		}
 
 		return new Response("Not found", { status: 404 });
