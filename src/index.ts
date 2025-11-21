@@ -356,14 +356,15 @@ export default {
 
 		if (orgMatch) {
 			const [, hasAt, orgName, endpoint] = orgMatch;
+			const prefix = hasAt ? "@" : "";
 
-			CURRENT_API_URL = `https://api.cloud.portaljs.com/@${orgName}`;
+			CURRENT_API_URL = `https://api.cloud.portaljs.com/${prefix}${orgName}`;
 
 			if (endpoint === "sse") {
-				return MyMCP.serveSSE(`/${orgName}/sse`).fetch(request, env, ctx);
+				return MyMCP.serveSSE(`/${prefix}${orgName}/sse`).fetch(request, env, ctx);
 			}
 			if (endpoint === "mcp") {
-				return MyMCP.serve(`/${orgName}/mcp`).fetch(request, env, ctx);
+				return MyMCP.serve(`/${prefix}${orgName}/mcp`).fetch(request, env, ctx);
 			}
 		}
 
