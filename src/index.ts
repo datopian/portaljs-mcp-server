@@ -2,20 +2,20 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-interface Env {
-	API_URL?: string;
-}
+/* |REMOVED ENV|, need to talk to Anu to remove from the worker deploy since its unecessary now
+Global variable to store current org (set in router per request)
+or be default URL if not presented with the org name in the mcp url
+*/
+let CURRENT_API_URL = "https://api.cloud.portaljs.com";
 
 // Define our MCP agent with tools
-export class MyMCP extends McpAgent<Env> {
+export class MyMCP extends McpAgent {
 	server = new McpServer({
 		name: "PortalJS MCP Server",
 		version: "1.0.0",
 	});
 
 	async init() {
-		const apiUrl = this.props?.env?.API_URL || "https://api.cloud.portaljs.com";
-
 		// Search tool
 		this.server.tool(
 			"search",
@@ -25,7 +25,12 @@ export class MyMCP extends McpAgent<Env> {
 				limit: z.number().optional().default(10).describe("Maximum number of results to return (default: 10)")
 			},
 			async ({ query, limit }) => {
-				const endpoint = `${apiUrl}/api/3/action/package_search?q=${encodeURIComponent(query)}&rows=${limit}`;
+				const apiUrl = CURRENT_API_URL;
+
+				let endpoint = `${apiUrl}/api/3/action/package_search?rows=${limit}`;
+				if (query && query !== "*") {
+					endpoint = `${apiUrl}/api/3/action/package_search?q=${encodeURIComponent(query)}&rows=${limit}`;
+				}
 
 				const response = await fetch(endpoint, {
 					method: "GET",
@@ -88,7 +93,10 @@ export class MyMCP extends McpAgent<Env> {
 				id: z.string().describe("ID or name of the dataset to fetch")
 			},
 			async ({ id }) => {
+				const apiUrl = CURRENT_API_URL;
 				const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
+
+				console.error('[FETCH] API URL:', apiUrl);
 
 				const response = await fetch(endpoint, {
 					method: "GET",
@@ -174,6 +182,9 @@ export class MyMCP extends McpAgent<Env> {
 				limit: z.number().optional().default(10).describe("Number of rows to preview (default: 10, max: 100)")
 			},
 			async ({ resource_id, limit }) => {
+				// Read API URL dynamically from env
+				console.error('[PREVIEW] API URL:', apiUrl);
+
 				const maxLimit = Math.min(limit, 100);
 
 				const parseCSV = (text: string, rowLimit: number): { fields: string[], records: any[] } => {
@@ -342,14 +353,35 @@ export class MyMCP extends McpAgent<Env> {
 }
 
 export default {
-	fetch(request: Request, env: Env, ctx: ExecutionContext) {
+	fetch(request: Request, env: any, ctx: ExecutionContext) {
 		const url = new URL(request.url);
+		const pathname = url.pathname;
 
-		if (url.pathname === "/sse" || url.pathname === "/sse/message") {
+		const orgMatch = pathname.match(/^\/(@)?([^\/]+)\/(sse|mcp)(\/.*)?$/);
+
+		if (orgMatch) {
+			const [, hasAt, orgName, endpoint] = orgMatch;
+
+			// Set org-scoped API URL
+			CURRENT_API_URL = `https://api.cloud.portaljs.com/@${orgName}`;
+			console.error('[ROUTER] Org:', orgName, 'Set CURRENT_API_URL to:', CURRENT_API_URL);
+
+			if (endpoint === "sse") {
+				return MyMCP.serveSSE(`/${orgName}/sse`).fetch(request, env, ctx);
+			}
+			if (endpoint === "mcp") {
+				return MyMCP.serve(`/${orgName}/mcp`).fetch(request, env, ctx);
+			}
+		}
+
+		// Reset to default API URL for legacy routes
+		CURRENT_API_URL = "https://api.cloud.portaljs.com";
+
+		if (pathname === "/sse" || pathname === "/sse/message") {
 			return MyMCP.serveSSE("/sse").fetch(request, env, ctx);
 		}
 
-		if (url.pathname === "/mcp") {
+		if (pathname === "/mcp") {
 			return MyMCP.serve("/mcp").fetch(request, env, ctx);
 		}
 
