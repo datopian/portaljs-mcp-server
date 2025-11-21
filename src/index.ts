@@ -8,7 +8,6 @@ or be default URL if not presented with the org name in the mcp url
 */
 let CURRENT_API_URL = "https://api.cloud.portaljs.com";
 
-// Define our MCP agent with tools
 export class MyMCP extends McpAgent {
 	server = new McpServer({
 		name: "PortalJS MCP Server",
@@ -182,7 +181,6 @@ export class MyMCP extends McpAgent {
 				limit: z.number().optional().default(10).describe("Number of rows to preview (default: 10, max: 100)")
 			},
 			async ({ resource_id, limit }) => {
-				// Read API URL dynamically from env
 				console.error('[PREVIEW] API URL:', apiUrl);
 
 				const maxLimit = Math.min(limit, 100);
@@ -362,7 +360,6 @@ export default {
 		if (orgMatch) {
 			const [, hasAt, orgName, endpoint] = orgMatch;
 
-			// Set org-scoped API URL
 			CURRENT_API_URL = `https://api.cloud.portaljs.com/@${orgName}`;
 			console.error('[ROUTER] Org:', orgName, 'Set CURRENT_API_URL to:', CURRENT_API_URL);
 
@@ -374,7 +371,6 @@ export default {
 			}
 		}
 
-		// Reset to default API URL for legacy routes
 		CURRENT_API_URL = "https://api.cloud.portaljs.com";
 
 		if (pathname === "/sse" || pathname === "/sse/message") {
