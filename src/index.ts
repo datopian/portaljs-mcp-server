@@ -2,7 +2,38 @@ import { McpAgent } from "agents/mcp";
 import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { z } from "zod";
 
-let CURRENT_API_URL = "https://api.cloud.portaljs.com";
+/**
+ * Base URL constant for PortalJS API
+ */
+const BASE_URL = "https://api.cloud.portaljs.com";
+
+/**
+ * Extract organization name from URL pathname
+ * Expected format: /@org-name/sse
+ * Returns: @org-name (e.g., "@lcc")
+ */
+function extractOrgFromPath(pathname: string): string | null {
+	if (pathname.startsWith('/@') && pathname.includes('/sse')) {
+		const sseIndex = pathname.indexOf('/sse');
+		return pathname.substring(1, sseIndex); // Extract @org-name
+	}
+	return null;
+}
+
+/**
+ * Current API URL with organization scope
+ *
+ * IMPORTANT: This variable is set by the router (at bottom of file) BEFORE tools execute.
+ * Router extracts org from request path and sets: current_api_url = BASE_URL/@org-name
+ * Then tools read this variable to make org-scoped API calls.
+ *
+ * Example flow:
+ * 1. Request comes to: /@lcc/sse
+ * 2. Router extracts: @lcc
+ * 3. Router sets: current_api_url = "https://api.cloud.portaljs.com/@lcc"
+ * 4. Tools use: current_api_url for API calls
+ */
+let current_api_url = BASE_URL;
 
 export class MyMCP extends McpAgent {
 	server = new McpServer({
@@ -20,9 +51,9 @@ export class MyMCP extends McpAgent {
 				limit: z.number().optional().default(10).describe("Maximum number of results to return (default: 10)")
 			},
 			async ({ query, limit }) => {
-				let endpoint = `${CURRENT_API_URL}/api/3/action/package_search?rows=${limit}`;
+				let endpoint = `${current_api_url}/api/3/action/package_search?rows=${limit}`;
 				if (query && query !== "*") {
-					endpoint = `${CURRENT_API_URL}/api/3/action/package_search?q=${encodeURIComponent(query)}&rows=${limit}`;
+					endpoint = `${current_api_url}/api/3/action/package_search?q=${encodeURIComponent(query)}&rows=${limit}`;
 				}
 
 				const response = await fetch(endpoint, {
@@ -58,7 +89,7 @@ export class MyMCP extends McpAgent {
 					name: item.name,
 					title: item.title,
 					description: item.notes,
-					url: `${CURRENT_API_URL}/dataset/${item.name}`,
+					url: `${current_api_url}/dataset/${item.name}`,
 					organization: item.organization?.name,
 					tags: item.tags?.map((tag: any) => tag.name),
 					created: item.metadata_created,
@@ -78,15 +109,15 @@ export class MyMCP extends McpAgent {
 			}
 		);
 
-		// Fetch tool
+		// Get  tool
 		this.server.tool(
-			"fetch",
-			"Fetch and display detailed information about a specific dataset including its resources, metadata, and properties.",
+			"get",
+			"Get and display detailed information about a specific dataset including its resources, metadata, and properties.",
 			{
-				id: z.string().describe("ID or name of the dataset to fetch")
+				id: z.string().describe("ID or name of the dataset to get")
 			},
 			async ({ id }) => {
-				const endpoint = `${CURRENT_API_URL}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
+				const endpoint = `${current_api_url}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
 
 				const response = await fetch(endpoint, {
 					method: "GET",
@@ -141,7 +172,7 @@ export class MyMCP extends McpAgent {
 					name: result.name,
 					title: result.title || null,
 					description: result.notes || null,
-					url: `${CURRENT_API_URL}/dataset/${result.name}`,
+					url: `${current_api_url}/dataset/${result.name}`,
 					organization: result.organization || null,
 					tags: Array.isArray(result.tags) ? result.tags : [],
 					resources: Array.isArray(result.resources) ? result.resources : [],
@@ -241,7 +272,7 @@ export class MyMCP extends McpAgent {
 				};
 
 				try {
-					const resourceEndpoint = `${CURRENT_API_URL}/api/3/action/resource_show?id=${encodeURIComponent(resource_id)}`;
+					const resourceEndpoint = `${current_api_url}/api/3/action/resource_show?id=${encodeURIComponent(resource_id)}`;
 					const resourceResponse = await fetch(resourceEndpoint);
 					const resourceData = await resourceResponse.json();
 
@@ -258,7 +289,7 @@ export class MyMCP extends McpAgent {
 					const format = (resourceData.result.format || '').toLowerCase();
 
 					try {
-						const datastoreEndpoint = `${CURRENT_API_URL}/api/3/action/datastore_search?resource_id=${encodeURIComponent(resource_id)}&limit=${maxLimit}`;
+						const datastoreEndpoint = `${current_api_url}/api/3/action/datastore_search?resource_id=${encodeURIComponent(resource_id)}&limit=${maxLimit}`;
 						const datastoreResponse = await fetch(datastoreEndpoint);
 						const datastoreData = await datastoreResponse.json();
 
@@ -344,21 +375,15 @@ export default {
 		const url = new URL(request.url);
 		const pathname = url.pathname;
 
-		// Check for /@org-name
-		if (pathname.startsWith('/@') && pathname.includes('/sse')) {
-			const sseIndex = pathname.indexOf('/sse');
-			const orgPath = pathname.substring(1, sseIndex);
-			CURRENT_API_URL = `https://api.cloud.portaljs.com/${orgPath}`;
+		// Extract organization from path
+		const orgPath = extractOrgFromPath(pathname);
+
+		if (orgPath) {
+			// Set org-scoped API URL for tools to use
+			current_api_url = `${BASE_URL}/${orgPath}`;
 			return MyMCP.serveSSE(`/${orgPath}/sse`).fetch(request, env, ctx);
 		}
 
-		// Default route
-		CURRENT_API_URL = "https://api.cloud.portaljs.com";
-
-		if (pathname === "/sse" || pathname === "/sse/message") {
-			return MyMCP.serveSSE("/sse").fetch(request, env, ctx);
-		}
-
-		return new Response("Not found", { status: 404 });
+		return new Response("Not found - Organization scope required. Use /@org-name/sse", { status: 404 });
 	},
 };
