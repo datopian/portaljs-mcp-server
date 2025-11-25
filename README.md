@@ -1,3 +1,5 @@
+[![MseeP.ai Security Assessment Badge](https://mseep.net/pr/datopian-portaljs-mcp-server-badge.png)](https://mseep.ai/app/datopian-portaljs-mcp-server)
+
 # Building a Remote MCP Server on Cloudflare (Without Auth)
 
 This example allows you to deploy a remote MCP server that doesn't require authentication on Cloudflare Workers. 
