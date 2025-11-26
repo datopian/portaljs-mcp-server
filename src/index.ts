@@ -20,26 +20,49 @@ function extractOrgFromPath(pathname: string): string | null {
 	return null;
 }
 
-/**
- * Current API URL with organization scope
- *
- * IMPORTANT: This variable is set by the router (at bottom of file) BEFORE tools execute.
- * Router extracts org from request path and sets: current_api_url = BASE_URL/@org-name
- * Then tools read this variable to make org-scoped API calls.
- *
- * Example flow:
- * 1. Request comes to: /@lcc/sse
- * 2. Router extracts: @lcc
- * 3. Router sets: current_api_url = "https://api.cloud.portaljs.com/@lcc"
- * 4. Tools use: current_api_url for API calls
- */
-let current_api_url = BASE_URL;
-
 export class MyMCP extends McpAgent {
 	server = new McpServer({
 		name: "PortalJS MCP Server",
 		version: "1.0.0",
 	});
+
+	/**
+	 * Organization name for this Durable Object instance
+	 * Set from URL on first request and persists for DO lifetime
+	 */
+	private orgName: string = "";
+
+	/**
+	 * Get organization-scoped API URL
+	 */
+	private getApiUrl(): string {
+		console.log("getApiUrl - this.orgName:", this.orgName);
+		if (this.orgName) {
+			const url = `${BASE_URL}/${this.orgName}`;
+			console.log("getApiUrl - returning scoped URL:", url);
+			return url;
+		}
+		console.log("getApiUrl - returning BASE_URL:", BASE_URL);
+		return BASE_URL;
+	}
+
+	/**
+	 * Override fetch to capture org name from URL
+	 */
+	async fetch(request: Request): Promise<Response> {
+		// Extract org from URL if not already set
+		if (!this.orgName) {
+			const url = new URL(request.url);
+			const extracted = extractOrgFromPath(url.pathname);
+			if (extracted) {
+				this.orgName = extracted;
+				console.log(`DO instance initialized for org: ${this.orgName}`);
+			}
+		}
+
+		// Call parent to handle MCP protocol
+		return super.fetch(request);
+	}
 
 	async init() {
 		// Search tool
@@ -51,10 +74,14 @@ export class MyMCP extends McpAgent {
 				limit: z.number().optional().default(10).describe("Maximum number of results to return (default: 10)")
 			},
 			async ({ query, limit }) => {
-				let endpoint = `${current_api_url}/api/3/action/package_search?rows=${limit}`;
+				console.log("Search tool - invoked with query:", query, "limit:", limit);
+				const apiUrl = this.getApiUrl();
+				console.log("Search tool - apiUrl:", apiUrl);
+				let endpoint = `${apiUrl}/api/3/action/package_search?rows=${limit}`;
 				if (query && query !== "*") {
-					endpoint = `${current_api_url}/api/3/action/package_search?q=${encodeURIComponent(query)}&rows=${limit}`;
+					endpoint = `${apiUrl}/api/3/action/package_search?q=${encodeURIComponent(query)}&rows=${limit}`;
 				}
+				console.log("Search tool - final endpoint:", endpoint);
 
 				const response = await fetch(endpoint, {
 					method: "GET",
@@ -89,7 +116,7 @@ export class MyMCP extends McpAgent {
 					name: item.name,
 					title: item.title,
 					description: item.notes,
-					url: `${current_api_url}/dataset/${item.name}`,
+					url: `${apiUrl}/dataset/${item.name}`,
 					organization: item.organization?.name,
 					tags: item.tags?.map((tag: any) => tag.name),
 					created: item.metadata_created,
@@ -117,7 +144,8 @@ export class MyMCP extends McpAgent {
 				id: z.string().describe("ID or name of the dataset to get")
 			},
 			async ({ id }) => {
-				const endpoint = `${current_api_url}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
+				const apiUrl = this.getApiUrl();
+				const endpoint = `${apiUrl}/api/3/action/package_show?id=${encodeURIComponent(id)}`;
 
 				const response = await fetch(endpoint, {
 					method: "GET",
@@ -172,7 +200,7 @@ export class MyMCP extends McpAgent {
 					name: result.name,
 					title: result.title || null,
 					description: result.notes || null,
-					url: `${current_api_url}/dataset/${result.name}`,
+					url: `${apiUrl}/dataset/${result.name}`,
 					organization: result.organization || null,
 					tags: Array.isArray(result.tags) ? result.tags : [],
 					resources: Array.isArray(result.resources) ? result.resources : [],
@@ -203,6 +231,7 @@ export class MyMCP extends McpAgent {
 				limit: z.number().optional().default(10).describe("Number of rows to preview (default: 10, max: 100)")
 			},
 			async ({ resource_id, limit }) => {
+				const apiUrl = this.getApiUrl();
 				const maxLimit = Math.min(limit, 100);
 
 				const parseCSV = (text: string, rowLimit: number): { fields: string[], records: any[] } => {
@@ -272,7 +301,7 @@ export class MyMCP extends McpAgent {
 				};
 
 				try {
-					const resourceEndpoint = `${current_api_url}/api/3/action/resource_show?id=${encodeURIComponent(resource_id)}`;
+					const resourceEndpoint = `${apiUrl}/api/3/action/resource_show?id=${encodeURIComponent(resource_id)}`;
 					const resourceResponse = await fetch(resourceEndpoint);
 					const resourceData = await resourceResponse.json();
 
@@ -289,7 +318,7 @@ export class MyMCP extends McpAgent {
 					const format = (resourceData.result.format || '').toLowerCase();
 
 					try {
-						const datastoreEndpoint = `${current_api_url}/api/3/action/datastore_search?resource_id=${encodeURIComponent(resource_id)}&limit=${maxLimit}`;
+						const datastoreEndpoint = `${apiUrl}/api/3/action/datastore_search?resource_id=${encodeURIComponent(resource_id)}&limit=${maxLimit}`;
 						const datastoreResponse = await fetch(datastoreEndpoint);
 						const datastoreData = await datastoreResponse.json();
 
@@ -371,16 +400,19 @@ export class MyMCP extends McpAgent {
 }
 
 export default {
-	fetch(request: Request, env: any, ctx: ExecutionContext) {
+	fetch(request: Request, env: Env, ctx: ExecutionContext) {
 		const url = new URL(request.url);
 		const pathname = url.pathname;
 
+		console.log("Router - pathname:", pathname);
+
 		// Extract organization from path
 		const orgPath = extractOrgFromPath(pathname);
+		console.log("Router - extracted orgPath:", orgPath);
 
 		if (orgPath) {
-			// Set org-scoped API URL for tools to use
-			current_api_url = `${BASE_URL}/${orgPath}`;
+			// serveSSE() will create/route to DO instance
+			// The DO's fetch() method will extract org from URL
 			return MyMCP.serveSSE(`/${orgPath}/sse`).fetch(request, env, ctx);
 		}
 
